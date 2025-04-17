@@ -371,10 +371,10 @@ def check_and_send_pdf(chat_id: int, user_id: int) -> bool:
     is_subscribed = check_subscription_sync(user_id)
 
     if is_subscribed:
-        # Если подписан, отправляем PDF
+        # Если подписан, отправляем PDF без дополнительных инструкций
         return send_pdf_document_sync(chat_id, user_id)
     else:
-        # Если не подписан, отправляем запрос на подписку
+        # Если не подписан, отправляем только запрос на подписку
         send_subscription_request(chat_id)
         return False
 
@@ -505,11 +505,22 @@ def handle_start(message):
     # Обновляем активность пользователя
     users[user_id]['last_activity'] = datetime.now()
 
-    # Отправляем приветствие с клавиатурой
-    send_welcome_with_button(chat_id)
+    # Проверяем подписку
+    is_subscribed = check_subscription_sync(user_id)
 
-    # Проверяем подписку и отправляем PDF, если пользователь подписан
-    check_and_send_pdf(chat_id, user_id)
+    if is_subscribed:
+        # Если пользователь подписан, сразу отправляем PDF
+        send_pdf_document_sync(chat_id, user_id)
+    else:
+        # Если не подписан, отправляем приветствие с клавиатурой
+        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        keyboard.add(types.KeyboardButton(CONFIG.get('checklist_button_text', 'Получить чек-лист')))
+
+        welcome_message = f'Привет! Подпишитесь на канал {CHANNEL_ID} и нажмите кнопку, чтобы получить чек-лист.'
+        bot.send_message(chat_id, welcome_message, reply_markup=keyboard)
+
+        # Отправляем запрос на подписку
+        send_subscription_request(chat_id)
 
     # Отмечаем, что приветствие отправлено
     users[user_id]['welcome_sent'] = True
