@@ -131,9 +131,13 @@ def load_users() -> None:
 def send_welcome_with_button(chat_id: int) -> None:
     """Отправляет приветственное сообщение с кнопкой для получения чек-листа."""
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    keyboard.add(types.KeyboardButton(CONFIG['checklist_button_text']))
+    keyboard.add(types.KeyboardButton(CONFIG.get('checklist_button_text', 'Получить чек-лист')))
 
-    bot.send_message(chat_id, CONFIG['welcome_message'], reply_markup=keyboard)
+    # Используем значение по умолчанию, если ключа нет в CONFIG
+    welcome_message = CONFIG.get('welcome_message',
+                                 f'Привет! Подпишитесь на канал {CHANNEL_ID} и нажмите кнопку, чтобы получить чек-лист.')
+
+    bot.send_message(chat_id, welcome_message, reply_markup=keyboard)
 
 
 # Функция отправки запроса на подписку
