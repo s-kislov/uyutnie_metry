@@ -1,15 +1,15 @@
-import os
 import json
 import logging
+import os
 import time
 from datetime import datetime
-from typing import Dict, Any, Optional, Union, List, Tuple
+from typing import Dict, Any
 
 import aiohttp
 import telebot
-from telebot import types
-from flask import Flask, request, jsonify, render_template_string, redirect, Response
 from dotenv import load_dotenv
+from flask import Flask, request, render_template_string, redirect, Response
+from telebot import types
 
 # Настройка логирования
 logging.basicConfig(
@@ -60,7 +60,6 @@ CONFIG = {
     'subscription_request': f'Чтобы получить чек-лист подготовки к ремонту, подпишитесь на канал {CHANNEL_ID} и нажмите /check для проверки подписки.',
     'pdf_message': 'Спасибо за подписку на канал! 🎁\n\nВот Ваш чек-лист для подготовки к ремонту:',
     'pdf_message_repeat': 'Вот Ваш чек-лист для подготовки к ремонту:',
-
 
     # Кнопки
     'checklist_button_text': 'Получить чек-лист',
@@ -658,6 +657,47 @@ def generate_users_csv() -> str:
     return csv_content
 
 
+def check_bot_channel_access() -> dict:
+    """
+    Проверяет доступ бота к каналу и его права администратора.
+
+    Returns:
+        dict: Словарь с результатами проверки
+    """
+    try:
+        # Получаем информацию о боте
+        bot_info = bot.get_me()
+        bot_name = bot_info.first_name
+        bot_username = bot_info.username
+
+        # Получаем информацию о канале
+        channel_info = bot.get_chat(CHANNEL_ID)
+        channel_name = channel_info.title
+        channel_username = channel_info.username
+
+        # Проверяем права бота в канале
+        bot_member = bot.get_chat_member(CHANNEL_ID, bot_info.id)
+        is_admin = bot_member.status in ['administrator', 'creator']
+        can_post = getattr(bot_member, 'can_post_messages', False)
+
+        return {
+            'success': True,
+            'bot_name': bot_name,
+            'bot_username': bot_username,
+            'channel_name': channel_name,
+            'channel_username': channel_username,
+            'is_admin': is_admin,
+            'can_post': can_post,
+            'status': bot_member.status
+        }
+    except Exception as e:
+        logger.error(f'Ошибка при проверке доступа бота к каналу: {e}')
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
 # Административная панель
 @app.route('/admin')
 def admin_panel():
@@ -667,6 +707,24 @@ def admin_panel():
 
     # Подготавливаем текст описания для редактирования
     editable_description = html_to_editable(CHANNEL_POST_DESCRIPTION)
+
+    # Проверяем доступ бота к каналу
+    channel_access = check_bot_channel_access()
+
+    # Формируем сообщение о статусе подключения
+    if channel_access['success']:
+        if channel_access['is_admin'] and channel_access['can_post']:
+            channel_status = f"Бот @{channel_access['bot_username']} подключён к каналу {channel_access['channel_name']} (@{channel_access['channel_username']}) и может публиковать посты ✅"
+            channel_status_class = "success"
+        elif channel_access['is_admin']:
+            channel_status = f"Бот @{channel_access['bot_username']} является администратором канала {channel_access['channel_name']}, но не имеет прав на публикацию сообщений ⚠️"
+            channel_status_class = "warning"
+        else:
+            channel_status = f"Бот @{channel_access['bot_username']} не является администратором канала {channel_access['channel_name']} и не может публиковать посты ❌"
+            channel_status_class = "danger"
+    else:
+        channel_status = f"Не удалось проверить доступ бота к каналу: {channel_access.get('error', 'Неизвестная ошибка')} ❌"
+        channel_status_class = "danger"
 
     html_template = """
     <!DOCTYPE html>
@@ -690,11 +748,15 @@ def admin_panel():
         form { margin-bottom: 20px; }
         input, textarea { width: 100%; padding: 8px; margin: 8px 0; box-sizing: border-box; }
         .help-text { color: #666; font-style: italic; margin: 5px 0; font-size: 0.9em; }
+        .status { padding: 10px; border-radius: 5px; margin: 10px 0; }
+        .success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .warning { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+        .danger { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
       </style>
     </head>
     <body>
       <h1>Панель управления Telegram-ботом</h1>
-      
+
       <div class="card">
         <h2>Статистика</h2>
         <div class="stats">
@@ -712,40 +774,43 @@ def admin_panel():
           </div>
         </div>
       </div>
-      
+
       <div class="card">
         <h2>Настройки PDF и бонусных файлов</h2>
         <form action="/update-pdf-settings" method="post">
           <label for="bonusPdfUrl">URL бонусного PDF-файла (отправляется подписчикам):</label>
           <input type="text" id="bonusPdfUrl" name="bonusPdfUrl" value="{{ bonus_pdf_url }}">
-          
+
           <button type="submit">Обновить настройки PDF</button>
         </form>
       </div>
-      
+
       <div class="card">
         <h2>Публикация в канал</h2>
+        <div class="status {{ channel_status_class }}">
+          {{ channel_status }}
+        </div>
         <form action="/publish-post" method="post">
           <label for="title">Заголовок:</label>
           <input type="text" id="title" name="title" value="{{ channel_post_title }}">
-          
+
           <label for="description">Описание:</label>
           <p class="help-text">Используйте *звездочки* для выделения текста жирным шрифтом</p>
           <textarea id="description" name="description" rows="5">{{ editable_description }}</textarea>
-          
+
           <label for="call">Призыв к действию:</label>
           <input type="text" id="call" name="call" value="{{ channel_post_call }}">
-          
+
           <label for="buttonText">Текст кнопки:</label>
           <input type="text" id="buttonText" name="buttonText" value="{{ channel_button_text }}">
-          
+
           <label for="imageUrl">URL изображения (оставьте пустым для текстового поста):</label>
           <input type="text" id="imageUrl" name="imageUrl" value="{{ image_url }}">
-          
+
           <button type="submit">Опубликовать пост</button>
         </form>
       </div>
-      
+
       <div class="card">
         <h2>Действия</h2>
         <p><a href="/save-users" class="button">Сохранить данные пользователей</a></p>
@@ -772,8 +837,11 @@ def admin_panel():
         editable_description=editable_description,
         channel_post_call=CHANNEL_POST_CALL,
         channel_button_text=CHANNEL_BUTTON_TEXT,
-        image_url=IMAGE_URL or ''
+        image_url=IMAGE_URL or '',
+        channel_status=channel_status,
+        channel_status_class=channel_status_class
     )
+
 
 # Маршрут для экспорта пользователей в CSV
 @app.route('/export-users')
@@ -785,6 +853,7 @@ def export_users():
         mimetype='text/csv',
         headers={'Content-Disposition': 'attachment; filename=users.csv'}
     )
+
 
 # Маршрут для экспорта пользователей в JSON
 @app.route('/export-users-json')
@@ -804,6 +873,7 @@ def export_users_json():
         mimetype='application/json',
         headers={'Content-Disposition': 'attachment; filename=users.json'}
     )
+
 
 # Маршрут для обновления настроек PDF
 @app.route('/update-pdf-settings', methods=['POST'])
@@ -832,6 +902,7 @@ def update_pdf_settings():
 
         return html_error.format(str(e)), 500
 
+
 # Маршрут для публикации поста
 @app.route('/publish-post', methods=['POST'])
 def publish_post():
@@ -850,7 +921,7 @@ def publish_post():
         # Форматируем описание
         formatted_description = description.replace('\r\n', '\n').replace('\n{3,}', '\n\n').strip()
         CHANNEL_POST_DESCRIPTION = ''.join(f'<b>{part}</b>' if i % 2 else part
-                                         for i, part in enumerate(formatted_description.split('*')))
+                                           for i, part in enumerate(formatted_description.split('*')))
 
         CHANNEL_POST_CALL = call
         CHANNEL_BUTTON_TEXT = button_text
@@ -877,6 +948,7 @@ def publish_post():
 
         return html_error.format(str(e)), 500
 
+
 # Маршрут для сохранения пользователей
 @app.route('/save-users')
 def save_users_route():
@@ -888,6 +960,7 @@ def save_users_route():
     """
 
     return html_response
+
 
 # Маршрут для проверки бота
 @app.route('/test-bot')
@@ -912,6 +985,7 @@ def test_bot():
 
         return html_error.format(str(e)), 500
 
+
 # Маршрут для проверки PDF
 @app.route('/test-pdf')
 def test_pdf():
@@ -929,11 +1003,11 @@ def test_pdf():
                     file_size = len(file_content)
 
                     is_pdf = (
-                        file_size >= 4 and
-                        file_content[0] == 0x25 and  # %
-                        file_content[1] == 0x50 and  # P
-                        file_content[2] == 0x44 and  # D
-                        file_content[3] == 0x46      # F
+                            file_size >= 4 and
+                            file_content[0] == 0x25 and  # %
+                            file_content[1] == 0x50 and  # P
+                            file_content[2] == 0x44 and  # D
+                            file_content[3] == 0x46  # F
                     )
 
                     first_20_bytes = ''.join(f'{b:02x}' for b in file_content[:20])
@@ -981,6 +1055,7 @@ def test_pdf():
 
         return html_error.format(url=BONUS_PDF_URL, error=str(e)), 500
 
+
 # Маршрут для очистки данных пользователей
 @app.route('/clear-users')
 def clear_users():
@@ -995,6 +1070,7 @@ def clear_users():
 
     return html_response
 
+
 # Маршрут для ручной публикации поста
 @app.route('/publish-post-manually')
 def publish_post_manually():
@@ -1004,15 +1080,18 @@ def publish_post_manually():
     except Exception as e:
         return f'Ошибка публикации поста: {e}', 500
 
+
 # Редирект с корневого URL на админ-панель для удобства
 @app.route('/')
 def root():
     return redirect('/admin')
 
+
 # Маршрут для мониторинга
 @app.route('/ping')
 def ping():
     return 'OK', 200
+
 
 # Функция периодического сохранения данных пользователей
 def periodic_save():
@@ -1023,10 +1102,10 @@ def periodic_save():
         except Exception as e:
             logger.error(f'Ошибка при периодическом сохранении данных: {e}')
 
+
 # Основная функция запуска приложения
 def main():
     import threading
-    import asyncio
 
     # Загружаем данные пользователей при запуске
     load_users()
@@ -1051,7 +1130,9 @@ def main():
     # Запускаем бота (этот вызов блокирующий)
     bot.polling(none_stop=True, interval=1)
 
+
 if __name__ == '__main__':
     # Импортируем asyncio только здесь для совместимости
     import asyncio
+
     main()
