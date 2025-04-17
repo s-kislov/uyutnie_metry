@@ -486,6 +486,7 @@ def html_to_editable(text: str) -> str:
 
 
 # Обработчик команды /start
+# Обработчик команды /start
 @bot.message_handler(commands=['start'])
 def handle_start(message):
     chat_id = message.chat.id
@@ -512,15 +513,25 @@ def handle_start(message):
         # Если пользователь подписан, сразу отправляем PDF
         send_pdf_document_sync(chat_id, user_id)
     else:
-        # Если не подписан, отправляем приветствие с клавиатурой
+        # Если не подписан, отправляем ОДНО сообщение с инструкцией и кнопкой
         keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
         keyboard.add(types.KeyboardButton(CONFIG.get('checklist_button_text', 'Получить чек-лист')))
 
-        welcome_message = f'Привет! Подпишитесь на канал {CHANNEL_ID} и нажмите кнопку, чтобы получить чек-лист.'
-        bot.send_message(chat_id, welcome_message, reply_markup=keyboard)
+        # Создаем инлайн-кнопку для перехода в канал
+        inline_keyboard = types.InlineKeyboardMarkup()
+        inline_keyboard.add(types.InlineKeyboardButton(
+            text="Перейти в канал",
+            url=f"https://t.me/{CHANNEL_ID.replace('@', '')}"
+        ))
 
-        # Отправляем запрос на подписку
-        send_subscription_request(chat_id)
+        # Отправляем единое сообщение с обоими клавиатурами
+        welcome_message = f'Привет! Чтобы получить чек-лист подготовки к ремонту, подпишитесь на канал {CHANNEL_ID} и нажмите /check для проверки подписки.'
+
+        bot.send_message(
+            chat_id,
+            welcome_message,
+            reply_markup=inline_keyboard  # Отправляем инлайн-клавиатуру для перехода в канал
+        )
 
     # Отмечаем, что приветствие отправлено
     users[user_id]['welcome_sent'] = True
